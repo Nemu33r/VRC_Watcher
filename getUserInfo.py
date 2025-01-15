@@ -1,10 +1,6 @@
 import vrchatapi
 import os
-from vrchatapi.api import authentication_api
 from vrchatapi.api import users_api
-from vrchatapi.exceptions import UnauthorizedException
-from vrchatapi.models.two_factor_auth_code import TwoFactorAuthCode
-from vrchatapi.models.two_factor_email_code import TwoFactorEmailCode
 from dotenv import load_dotenv
 from auth import create_api_client
 
