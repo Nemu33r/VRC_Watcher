@@ -76,13 +76,23 @@ async def hello(interaction: discord.Interaction):
 # 指定されたワールドIDのワールド情報を取得して表示する
 @tree.command(name="getworld", description="ワールド情報を取得します", guild=Object(id=os.getenv("GUILD_ID")))
 async def getworld(interaction: discord.Interaction, world_id: str):
-    logger.info("ワールド情報取得コマンドを受信、処理開始")
-    logger.info("ワールドID: %s", world_id)
-    global api_client, watch_world
-    watch_world = world_id
-    world_info = get_world_info(api_client, world_id)
-    await interaction.response.send_message(world_info)
-
+    try:
+        logger.info("ワールド情報取得コマンドを受信、処理開始")
+        logger.info("ワールドID: %s", world_id)
+        global api_client, watch_world
+        watch_world = world_id
+        world_info = get_world_info(api_client, world_id)
+        await interaction.response.send_message(world_info)
+    except vrchatapi.ApiException as e:
+        logger.error("ワールド情報取得に失敗")
+        logger.error("Exception when calling API: %s\n", e)
+        if e.status == 404:
+            await interaction.response.send_message("指定したワールドが存在しませんでした。")
+        elif e.status == 429:
+            await interaction.response.send_message("APIのリクエスト制限に達しました。")
+        else:
+            await interaction.response.send_message("ワールド情報が取得できませんでした。管理者にお問い合わせください。")
+        
 # 指定されたワールドIDのワールド情報を定期的に取得して表示する
 @tree.command(name="setworld", description="ワールド情報を定期的に取得します", guild=Object(id=os.getenv("GUILD_ID")))
 async def setworld(interaction: discord.Interaction, world_id: str, interval_min: int):
@@ -94,8 +104,12 @@ async def setworld(interaction: discord.Interaction, world_id: str, interval_min
         while True:
             logger.info("定期ワールド情報取得開始")
             world_info = get_world_info(api_client, world_id)
-            await interaction.channel.send(world_info)
-            logger.info("定期ワールド情報取得完了、次回実行までSleep")
+            if world_info:
+                await interaction.channel.send(world_info)
+                logger.info("定期ワールド情報取得完了、次回実行までSleep")
+            else:
+                await interaction.channel.send("ワールド情報の取得に失敗しました。")
+                logger.info("ワールド情報取得失敗。次回実行までSleep")
             await asyncio.sleep(interval_min * 60)
             
     # 既存のタスクがあればキャンセル
