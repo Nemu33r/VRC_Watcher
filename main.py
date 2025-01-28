@@ -4,12 +4,14 @@ import random
 import vrchatapi
 import os
 import asyncio
+import json
 from discord import app_commands
 from discord import Object
 from auth import create_api_client
 from auth import check_auth
 from getWorldInfo import get_world_info
 from logger import logger
+from deepdiff import DeepDiff
 
 # インテントの設定
 intents = discord.Intents.default()
@@ -24,6 +26,7 @@ tree = app_commands.CommandTree(client)
 api_client = None
 watch_user = None
 watch_world = None
+previous_world_info = None
 
 # タスク管理用のグローバル変数
 world_task = None
@@ -88,28 +91,67 @@ async def getworld(interaction: discord.Interaction, world_id: str):
         logger.error("Exception when calling API: %s\n", e)
         if e.status == 404:
             await interaction.response.send_message("指定したワールドが存在しませんでした。")
+            raise e
         elif e.status == 429:
             await interaction.response.send_message("APIのリクエスト制限に達しました。")
+            raise e
+        elif e.status == 400:
+            await interaction.response.send_message("不正なリクエストです。ワールドIDを確かめてください。")
+            raise e
         else:
             await interaction.response.send_message("ワールド情報が取得できませんでした。管理者にお問い合わせください。")
+            raise e
         
 # 指定されたワールドIDのワールド情報を定期的に取得して表示する
 @tree.command(name="setworld", description="ワールド情報を定期的に取得します", guild=Object(id=os.getenv("GUILD_ID")))
 async def setworld(interaction: discord.Interaction, world_id: str, interval_min: int):
-    global api_client, watch_world, world_task
+    global api_client, watch_world, world_task, previous_world_info
     watch_world = world_id
     
     # 定期的にワールド情報を取得するタスク
     async def fetch_world_info():
+        global previous_world_info
         while True:
-            logger.info("定期ワールド情報取得開始")
-            world_info = get_world_info(api_client, world_id)
-            if world_info:
-                await interaction.channel.send(world_info)
-                logger.info("定期ワールド情報取得完了、次回実行までSleep")
-            else:
-                await interaction.channel.send("ワールド情報の取得に失敗しました。")
-                logger.info("ワールド情報取得失敗。次回実行までSleep")
+            try:
+                logger.info("定期ワールド情報取得開始")
+                current_world_info = get_world_info(api_client, world_id)
+                if current_world_info:
+                    logger.info("ワールド情報取得成功. 取得したワールド情報: %s", current_world_info)
+                    if previous_world_info is None: 
+                        # 初回取得の場合は取得した情報を保持
+                        logger.info("初回の取得処理。取得したワールド情報を保持")
+                        previous_world_info = current_world_info
+                        logger.info("previous_world_info: %s", previous_world_info)
+                        logger.info("current_world_info: %s", current_world_info)
+                        await interaction.channel.send(f"初回取得を完了しました。ワールド情報: {current_world_info}")
+                        logger.info("初回ワールド情報取得完了、次回実行までSleep")
+                    elif previous_world_info != current_world_info:
+                        logger.info("差分を検知。通知処理を実施")
+                        # 差分を取得して通知
+                        logger.info("前回のワールド情報: %s", previous_world_info)
+                        logger.info("現在のワールド情報: %s", current_world_info)
+                        # 2つのJSONから差分を取得
+                        diff = DeepDiff(previous_world_info, current_world_info, ignore_order=True).to_json()
+                        diff_json = json.dumps(diff, ensure_ascii=False)
+
+                        logger.info("差分: %s", diff_json)
+                        logger.info("通知処理を実施")
+                        await interaction.channel.send(f"ワールド情報に変更がありました: {diff_json}")
+                        logger.info("通知完了。取得したワールド情報を保持")
+                        previous_world_info = current_world_info
+                        logger.info("previous_world_info: %s", previous_world_info)
+                        logger.info("定期ワールド情報取得完了、次回実行までSleep")
+                    else:
+                        logger.info("ワールド情報に変更なし。次回実行までSleep")
+                else:
+                    await interaction.channel.send("例外が発生。ワールド情報の取得に失敗しました。")
+                    logger.info("ワールド情報取得失敗。次回実行までSleep")
+            except vrchatapi.ApiException as e:
+                logger.error("想定外発生")
+                logger.error("Exception when calling API: %s\n", e)
+            except TypeError as e:
+                logger.error("TypeError発生: %s", e)
+            logger.info("次回実行までSleep。間隔: %s分", interval_min)
             await asyncio.sleep(interval_min * 60)
             
     # 既存のタスクがあればキャンセル
@@ -125,11 +167,12 @@ async def setworld(interaction: discord.Interaction, world_id: str, interval_min
 # 定期取得を停止するコマンド
 @tree.command(name="stopworld", description="ワールド情報の定期取得を停止します", guild=Object(id=os.getenv("GUILD_ID")))
 async def stopworld(interaction: discord.Interaction):
-    global world_task
+    global world_task, previous_world_info
     if world_task is not None:
         logger.info("定期ワールド情報取得停止コマンドを受信。停止開始")
         world_task.cancel()
         world_task = None
+        previous_world_info = None
         logger.info("定期ワールド情報取得停止完了")
         await interaction.response.send_message("ワールド情報の定期取得を停止しました。")
     else:
