@@ -1,5 +1,6 @@
 import vrchatapi
 import os
+import time
 from vrchatapi.api import authentication_api
 from vrchatapi.exceptions import UnauthorizedException
 from vrchatapi.models.two_factor_auth_code import TwoFactorAuthCode
@@ -7,6 +8,7 @@ from vrchatapi.models.two_factor_email_code import TwoFactorEmailCode
 from dotenv import load_dotenv
 from generate_TOTP import generate_TOTP
 from logger import logger
+from const import RETRY_ATTEMPTS, RETRY_DELAY
 
 ############################################
 #  create_api_client
@@ -43,9 +45,13 @@ def create_api_client():
                 logger.info("2FAコードの検証に成功")
                 return api_client
             except vrchatapi.ApiException as e:
-                logger.error("ログイン失敗：2FAコードの検証に失敗")
-                logger.error("Exception when calling API: %s\n", e)
-                raise e
+                if e.status == 429:
+                    logger.error("ログイン失敗：APIのリクエスト制限に達しました。リトライします。")
+                    time.sleep(RETRY_DELAY)
+                else:
+                    logger.error("ログイン失敗：2FAコードの検証に失敗")
+                    logger.error("Exception when calling API: %s\n", e)
+                    raise e
         elif e.status == 200:
             try:
                 auth_api.verify2_fa_email_code(two_factor_email_code=TwoFactorEmailCode(input("Email 2FA Code: ")))
@@ -55,6 +61,9 @@ def create_api_client():
                 logger.error("ログイン失敗：2FAメールコードの検証に失敗")
                 logger.error("Exception when calling API: %s\n", e)
                 raise e 
+        elif e.status == 429:
+            logger.error("ログイン失敗：APIのリクエスト制限に達しました。リトライします。")
+            time.sleep(RETRY_DELAY)
         else:
             logger.error("ログイン失敗：例外が発生")
             logger.error("Exception when calling API: %s\n", e)

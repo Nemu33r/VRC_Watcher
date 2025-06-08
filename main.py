@@ -132,7 +132,8 @@ async def setworld(interaction: discord.Interaction, world_id: str, interval_min
                         logger.info("現在のワールド情報: %s", current_world_info)
                         # 2つのJSONから差分を取得
                         diff = DeepDiff(previous_world_info, current_world_info, ignore_order=True).to_json()
-                        diff_json = json.dumps(diff, ensure_ascii=False)
+                        changes = {key: value for key, value in diff.items() if key in ['values_changed']}
+                        diff_json = json.dumps(changes, ensure_ascii=False)
 
                         logger.info("差分: %s", diff_json)
                         logger.info("通知処理を実施")
